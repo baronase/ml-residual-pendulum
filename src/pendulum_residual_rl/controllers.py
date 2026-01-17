@@ -45,15 +45,32 @@ class EnergyPDController:
     # Residual scale not used here (for later); controller outputs full torque
     max_torque: float
 
-    def __init__(self, kp_in: float = 10.0, kd_in: float = 1.0, ke_in: float = 2.0, theta_switch_in: float = 0.5, max_torque_in: float = 2.0) -> None:
+    def __init__(self, kp_in: float = 10.0, kd_in: float = 1.0,
+                 ke_in: float = 2.0, theta_switch_in: float = 0.5,
+                 max_torque_in: float = 2.0, log_interval_in=10) -> None:
         self.kp = kp_in
         self.kd = kd_in
         self.ke = ke_in
         self.theta_switch = theta_switch_in
         self.max_torque = max_torque_in
+        # DEBUG
+        self.step_for_print = 0
+        self.log_interval = log_interval_in
+
+        # pendulum
+        self.pen_l = 1
+        self.pen_m = 1
+        self.pen_I = self.pen_m * (self.pen_l ** 2) / 3.0
 
     def energy(self, theta: float, theta_dot: float) -> float:
-        return 0.5 * (theta_dot ** 2) + (1.0 + math.cos(theta))
+        # Ek = 0.5 * I * omega**2
+        Ek = 0.5 * self.pen_I * theta_dot ** 2
+        # Ep = m * g * l * (1.0 + math.cos(theta))   # Pendulum-v1 convention
+        Ep = 1 * 10 * self.pen_l / 2 * (1.0 + math.cos(theta))
+        return Ek + Ep
+
+    # def energy(self, theta: float, theta_dot: float) -> float:  # <--- ORIGINAL
+    #     return 0.5 * (theta_dot ** 2) + (1.0 + math.cos(theta))
 
     def u_pd(self, theta: float, theta_dot: float) -> float:
         # stabilize around theta=0
@@ -62,9 +79,10 @@ class EnergyPDController:
 
     def u_energy(self, theta: float, theta_dot: float) -> float:
         # energy target: upright (theta=0, theta_dot=0) => E*=2
-        e = self.energy(theta, theta_dot) - 2.0  # positive => too much energy
+        e = self.energy(theta, theta_dot) - 10.0  # positive => too much energy
         # Pumping direction: "push with the swing" when energy is low, oppose when high
-        direction = math.copysign(1.0, theta_dot * math.cos(theta) + 1e-6)
+        # direction = math.copysign(1.0, theta_dot * math.cos(theta) + 1e-6)  # <-- ORIGINAL
+        direction = math.copysign(1.0, theta_dot + 1e-6)
         return -self.ke * e * direction
 
     def blend_weight(self, theta: float) -> float:
@@ -80,13 +98,21 @@ class EnergyPDController:
         return x * x
 
     def __call__(self, obs: np.ndarray) -> np.ndarray:
+        # DEBUG
+        self.step_for_print += 1
+
         theta, theta_dot = obs_to_theta_theta_dot(obs)
         u_e = self.u_energy(theta, theta_dot)
         u_p = self.u_pd(theta, theta_dot)
 
+        if self.step_for_print % self.log_interval == 0:
+            print(
+                f"step: {self.step_for_print} - x:{obs[0]:.2f}, y:{obs[1]:.2f} | theta:{theta:.2f} theta_dot:{theta_dot:.2f}")
+
         w = self.blend_weight(theta)
         u = (1.0 - w) * u_e + w * u_p
-
+        if self.step_for_print % self.log_interval == 0:
+            print(f"step: {self.step_for_print} - u_e:{u_e:.2f}, u_p:{u_p:.2f} | w:{w} u:{u:.2f}")
         # clip to env action bounds
         u = float(np.clip(u, -self.max_torque, self.max_torque))
         return np.array([u], dtype=np.float32)
