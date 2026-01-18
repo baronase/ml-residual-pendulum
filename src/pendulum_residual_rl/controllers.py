@@ -46,7 +46,7 @@ class EnergyPDController:
     max_torque: float
 
     def __init__(self, kp_in: float = 10.0, kd_in: float = 1.0,
-                 ke_in: float = 2.0, theta_switch_in: float = 0.5,
+                 ke_in: float = 5.0, theta_switch_in: float = 0.3,
                  max_torque_in: float = 2.0, log_interval_in=10) -> None:
         self.kp = kp_in
         self.kd = kd_in
